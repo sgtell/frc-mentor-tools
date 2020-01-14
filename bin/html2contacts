@@ -1,0 +1,141 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use JSON;
+use Data::Dumper;
+
+
+sub usage {
+        print STDERR "$0 [options] CONTACTS-HTML-FILE\n";
+        print STDERR "options:\n";
+        print STDERR " -v   verbose\n";
+        print STDERR " -m   email addresses only\n";
+        print STDERR " -p   missing parents info\n";
+        print STDERR " -c   missing consent & release form\n";
+        print STDERR " -g   complete info only\n";
+}
+
+my %optctl = ("D|debug!"   => \$debug,
+              "I|include=s" => \@incpath,
+              "v|verbose!" => \$verbose,
+              "m|maillist!" => \$maillist,
+              "p|missing-parents!" => \$xparents,
+              "c|missing-consent!" => \$xconsent,
+              "g|all-good!" => \$onlygood,
+             );
+
+Getopt::Long::config('no_auto_abbrev',
+                     'no_ignore_case',
+                     'no_ignore_case_always');
+
+if(!GetOptions(%optctl)) {
+        &usage();
+        exit 1;
+}
+
+if($#ARGV != 0) {
+	usage();
+	exit(1);
+}
+
+while($_ = <>) {
+	 if($_ =~ m/var ContactRosterModel = (\{.*);/) {
+	       $crm = $1;
+#	       print $crm;
+	 }
+}
+$ref = decode_json($crm);
+
+#print $ref;
+if($ref && $verbose) {
+	print Dumper($ref);
+}
+$studentlist = $ref->{TeamStudents};
+
+if(!$onlygood && !$xparents && !$xconsent && !$maillist) {
+print "name_first,name_last,email,phone,type,parent_name_first,parent_name_last,parent_email,parent_phone,ApplicationStatus,FlagAccepted,FlagPending,FlagDenied,FlagAwardSubmitter,ConsentReleaseStatus,SortOrder\n";
+}
+
+sub printcsv
+{
+	my($s) = @_;
+	printf "%s,%s,",  $s->{name_first},$s->{name_last};
+	printf "%s,",     $s->{email};
+	printf "\"%s\",", format_usa_phone($s->{phone});
+	printf "%s,", 	  $s->{type};
+	printf "%s,", 	  $s->{parent_name_first};
+	printf "%s,", 	  $s->{parent_name_last};
+	printf "%s,", 	  $s->{parent_email};
+	printf "\"%s\",", format_usa_phone($s->{parent_phone});
+	printf "%s,", 	  $s->{ApplicationStatus};
+	printf "%s,", 	  $s->{FlagAccepted};
+	printf "%s,", 	  $s->{FlagPending};
+	printf "%s,", 	  $s->{FlagDenied};
+	printf "%s,", 	  $s->{FlagAwardSubmitter};
+	printf "%s,", 	  $s->{ConsentReleaseStatus};
+	printf "%s\n", 	  $s->{SortOrder};
+}
+
+sub printsimple
+{
+	my($s) = @_;
+	my $name = sprintf "%s %s",  $s->{name_first},$s->{name_last};
+	printf "%-30s %s",  $name, $s->{email};
+	printf "\n";
+}
+
+sub printmail
+{
+	my($s) = @_;
+	my $name = sprintf "%s %s",  $s->{name_first},$s->{name_last};
+	printf "%-30s <%s>,",  $name, $s->{email};
+	printf "\n";
+}
+
+
+student: foreach $s (@$studentlist) {
+	if($maillist) {
+		printmail($s);
+	} elsif($onlygood) {
+		next student if($s->{ConsentReleaseStatus} != 1);
+		next student if($s->{parent_email} eq '');
+		next student if($s->{parent_name_first} eq '');
+		next student if($s->{parent_name_last} eq '');
+		printsimple($s);
+	} elsif($xconsent) {
+		next student if($s->{ConsentReleaseStatus} == 1);
+		printsimple($s);
+	} elsif($xparents) {
+		if($s->{parent_name_first}
+		   && $s->{parent_name_last}
+		   && $s->{parent_email}
+#		   && $s->{parent_phone}
+		  ) {
+			next student;
+		}
+		printsimple($s);
+	} else {
+		printcsv($s);
+	}
+}
+
+sub format_usa_phone
+{
+	my($p) = (@_);
+	$p =~ s/[-+ )(]//g;
+
+	if(length($p) == 10) {
+		if($p =~ m/^(\d{3})(\d{3})(\d{4})$/) {
+			return sprintf "%s-%s-%s", $1, $2, $3;
+		}
+	} elsif(length($p) == 11) {
+		if($p =~ m/^(\d)(\d{3})(\d{3})(\d{4})/) {
+			return sprintf "+%s %s-%s-%s", $1, $2, $3;
+		}
+	} else {
+		return @_;
+	}
+}
+
+
+
